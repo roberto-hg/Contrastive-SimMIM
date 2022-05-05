@@ -25,15 +25,15 @@ class SwinTransformerForSimMIM(SwinTransformer):
         self.mask_token = nn.Parameter(torch.zeros(1, 1, self.embed_dim))
         trunc_normal_(self.mask_token, mean=0., std=.02)
 
-    def forward(self, x, mask):
+    def forward(self, x, mask=None):
         x = self.patch_embed(x)
 
-        assert mask is not None
-        B, L, _ = x.shape
+        if mask is not None:
+            B, L, _ = x.shape
 
-        mask_tokens = self.mask_token.expand(B, L, -1)
-        w = mask.flatten(1).unsqueeze(-1).type_as(mask_tokens)
-        x = x * (1. - w) + mask_tokens * w
+            mask_tokens = self.mask_token.expand(B, L, -1)
+            w = mask.flatten(1).unsqueeze(-1).type_as(mask_tokens)
+            x = x * (1. - w) + mask_tokens * w
 
         if self.ape:
             x = x + self.absolute_pos_embed
@@ -66,15 +66,15 @@ class VisionTransformerForSimMIM(VisionTransformer):
     def _trunc_normal_(self, tensor, mean=0., std=1.):
         trunc_normal_(tensor, mean=mean, std=std, a=-std, b=std)
 
-    def forward(self, x, mask):
+    def forward(self, x, mask=None):
         x = self.patch_embed(x)
 
-        assert mask is not None
-        B, L, _ = x.shape
+        if mask is not None:
+            B, L, _ = x.shape
 
-        mask_token = self.mask_token.expand(B, L, -1)
-        w = mask.flatten(1).unsqueeze(-1).type_as(mask_token)
-        x = x * (1 - w) + mask_token * w
+            mask_token = self.mask_token.expand(B, L, -1)
+            w = mask.flatten(1).unsqueeze(-1).type_as(mask_token)
+            x = x * (1 - w) + mask_token * w
 
         cls_tokens = self.cls_token.expand(B, -1, -1)  # stole cls_tokens impl from Phil Wang, thanks
         x = torch.cat((cls_tokens, x), dim=1)
@@ -110,15 +110,49 @@ class SimMIM(nn.Module):
 
         self.in_chans = self.encoder.in_chans
         self.patch_size = self.encoder.patch_size
+        
+        self.ce_loss = nn.CrossEntropyLoss()
+        
+    def info_nce_loss(self, z: torch.Tensor):
+        '''InfoNCE loss taken from PyTorch SimCLR repository: https://github.com/sthalles/SimCLR/blob/master/simclr.py'''
+        batch_size = z.size(0)
+        labels = torch.cat([torch.arange(batch_size) for _ in range(2)], dim=0) # (1, ..., B) * 2
+        labels = (labels.unsqueeze(0) == labels.unsqueeze(1)).float()
+        
+        similarity_matrix = torch.matmul(z, z.T)
+        mask = torch.eye(labels.shape[0], dtype=torch.bool)
+        labels = labels[~mask].view(labels.shape[0], -1)
+        similarity_matrix = similarity_matrix[~mask].view(similarity_matrix.shape[0], -1)
+        # assert similarity_matrix.shape == labels.shape
+
+        # select and combine multiple positives
+        positives = similarity_matrix[labels.bool()].view(labels.shape[0], -1)
+
+        # select only the negatives the negatives
+        negatives = similarity_matrix[~labels.bool()].view(similarity_matrix.shape[0], -1)
+
+        logits = torch.cat([positives, negatives], dim=1)
+        labels = torch.zeros(logits.shape[0], dtype=torch.long)
+
+        logits = logits / 0.07
+        
+        loss = self.ce_loss(logits, labels)
+        return loss.mean()
 
     def forward(self, x, mask):
-        z = self.encoder(x, mask)
-        x_rec = self.decoder(z)
+        # encodings
+        z_mask = self.encoder(x, mask)
+        z = self.encoder(x)
+        
+        # patched (heavy augmented) decoding
+        x_rec = self.decoder(z_mask)
 
         mask = mask.repeat_interleave(self.patch_size, 1).repeat_interleave(self.patch_size, 2).unsqueeze(1).contiguous()
         loss_recon = F.l1_loss(x, x_rec, reduction='none')
         loss = (loss_recon * mask).sum() / (mask.sum() + 1e-5) / self.in_chans
-        return loss
+        
+        nce_loss = self.info_nce_loss(z)
+        return loss + nce_loss
 
     @torch.jit.ignore
     def no_weight_decay(self):
