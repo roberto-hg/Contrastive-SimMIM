@@ -113,7 +113,7 @@ class SimMIM(nn.Module):
         
         self.ce_loss = nn.CrossEntropyLoss()
         
-    def info_nce_loss(self, z: torch.Tensor):
+    def info_nce_loss(self, z: torch.Tensor, temp=0.07):
         '''InfoNCE loss taken from PyTorch SimCLR repository: https://github.com/sthalles/SimCLR/blob/master/simclr.py'''
         batch_size = z.size(0)
         labels = torch.cat([torch.arange(batch_size) for _ in range(2)], dim=0) # (1, ..., B) * 2
@@ -134,7 +134,7 @@ class SimMIM(nn.Module):
         logits = torch.cat([positives, negatives], dim=1)
         labels = torch.zeros(logits.shape[0], dtype=torch.long)
 
-        logits = logits / 0.07
+        logits = logits / temp
         
         loss = self.ce_loss(logits, labels)
         return loss.mean()
