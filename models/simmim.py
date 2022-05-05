@@ -137,7 +137,7 @@ class SimMIM(nn.Module):
         logits = logits / temp
         
         loss = self.ce_loss(logits, labels)
-        return loss.mean()
+        return loss # should be scalar, as reduction is defaulted to mean
 
     def forward(self, x, mask):
         # encodings
@@ -151,6 +151,7 @@ class SimMIM(nn.Module):
         loss_recon = F.l1_loss(x, x_rec, reduction='none')
         loss = (loss_recon * mask).sum() / (mask.sum() + 1e-5) / self.in_chans
         
+        # lightly augmented loss
         nce_loss = self.info_nce_loss(z)
         return loss + nce_loss
 
