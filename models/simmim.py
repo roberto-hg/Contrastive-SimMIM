@@ -97,7 +97,7 @@ class VisionTransformerForSimMIM(VisionTransformer):
 
 
 class SimMIM(nn.Module):
-    def __init__(self, encoder, encoder_stride):
+    def __init__(self, encoder, encoder_stride, **kwargs):
         super().__init__()
         self.encoder = encoder
         self.encoder_stride = encoder_stride
@@ -114,7 +114,10 @@ class SimMIM(nn.Module):
         
         self.ce_loss = nn.CrossEntropyLoss()
         
+        self.contrastive_coef = kwargs['lambda']
+        
     def info_nce_loss(self, z: torch.Tensor, z_mask: torch.Tensor, temp=0.07):
+        # NOTE: SLIP has default temperature 0.1
         q_a = z_mask
         q_b = z
 
@@ -147,6 +150,7 @@ class SimMIM(nn.Module):
             pred = torch.argmax(torch.cat([logits_ab, logits_aa], dim=1), dim=-1)
             correct = pred.eq(self.labels).sum()
             acc = 100 * correct / local_batch_size
+            print(f'accuracy: {acc}')
 
         return loss
     
@@ -164,7 +168,7 @@ class SimMIM(nn.Module):
         
         # lightly augmented loss
         nce_loss = self.info_nce_loss(z, z_mask)
-        return loss + nce_loss
+        return loss + self.contrastive_coef * nce_loss
 
     @torch.jit.ignore
     def no_weight_decay(self):
