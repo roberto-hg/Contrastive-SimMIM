@@ -14,6 +14,7 @@ from timm.models.layers import trunc_normal_
 
 from .swin_transformer import SwinTransformer
 from .vision_transformer import VisionTransformer
+import utils
 
 
 class SwinTransformerForSimMIM(SwinTransformer):
@@ -113,32 +114,42 @@ class SimMIM(nn.Module):
         
         self.ce_loss = nn.CrossEntropyLoss()
         
-    def info_nce_loss(self, z: torch.Tensor, temp=0.07):
-        '''InfoNCE loss taken from PyTorch SimCLR repository: https://github.com/sthalles/SimCLR/blob/master/simclr.py'''
-        batch_size = z.size(0)
-        labels = torch.cat([torch.arange(batch_size) for _ in range(2)], dim=0) # (1, ..., B) * 2
-        labels = (labels.unsqueeze(0) == labels.unsqueeze(1)).float()
-        
-        similarity_matrix = torch.matmul(z, z.T)
-        mask = torch.eye(labels.shape[0], dtype=torch.bool)
-        labels = labels[~mask].view(labels.shape[0], -1)
-        similarity_matrix = similarity_matrix[~mask].view(similarity_matrix.shape[0], -1)
-        # assert similarity_matrix.shape == labels.shape
+    def info_nce_loss(self, z: torch.Tensor, z_mask: torch.Tensor, temp=0.07):
+        q_a = z_mask
+        q_b = z
 
-        # select and combine multiple positives
-        positives = similarity_matrix[labels.bool()].view(labels.shape[0], -1)
+        q_a = F.normalize(q_a, dim=-1, p=2)
+        q_b = F.normalize(q_b, dim=-1, p=2)
 
-        # select only the negatives the negatives
-        negatives = similarity_matrix[~labels.bool()].view(similarity_matrix.shape[0], -1)
+        local_batch_size = q_a.size(0)
 
-        logits = torch.cat([positives, negatives], dim=1)
-        labels = torch.zeros(logits.shape[0], dtype=torch.long)
+        if local_batch_size != self.last_local_batch_size:
+            self.labels = local_batch_size * utils.get_rank() + torch.arange(
+                local_batch_size, device=q_a.device
+            )
+            total_batch_size = local_batch_size * utils.get_world_size()
+            self.masks = F.one_hot(self.labels, total_batch_size) * 1e9
+            self.last_local_batch_size = local_batch_size
 
-        logits = logits / temp
-        
-        loss = self.ce_loss(logits, labels)
-        return loss # should be scalar, as reduction is defaulted to mean
+        logits_aa = torch.matmul(q_a, q_a.transpose(0, 1)) / temp
+        logits_aa = logits_aa - self.masks
+        logits_bb = torch.matmul(q_b, q_b.transpose(0, 1)) / temp
+        logits_bb = logits_bb - self.masks
+        logits_ab = torch.matmul(q_a, q_b.transpose(0, 1)) / temp
+        logits_ba = torch.matmul(q_b, q_a.transpose(0, 1)) / temp
 
+        loss_a = F.cross_entropy(torch.cat([logits_ab, logits_aa], dim=1), self.labels)
+        loss_b = F.cross_entropy(torch.cat([logits_ba, logits_bb], dim=1), self.labels)
+        loss = (loss_a + loss_b) / 2  # divide by 2 to average over all samples
+
+        # compute accuracy
+        with torch.no_grad():
+            pred = torch.argmax(torch.cat([logits_ab, logits_aa], dim=1), dim=-1)
+            correct = pred.eq(self.labels).sum()
+            acc = 100 * correct / local_batch_size
+
+        return loss
+    
     def forward(self, x, mask):
         # encodings
         z_mask = self.encoder(x, mask)
@@ -152,7 +163,7 @@ class SimMIM(nn.Module):
         loss = (loss_recon * mask).sum() / (mask.sum() + 1e-5) / self.in_chans
         
         # lightly augmented loss
-        nce_loss = self.info_nce_loss(z)
+        nce_loss = self.info_nce_loss(z, z_mask)
         return loss + nce_loss
 
     @torch.jit.ignore
