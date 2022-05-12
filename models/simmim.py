@@ -114,7 +114,7 @@ class SimMIM(nn.Module):
         
         self.ce_loss = nn.CrossEntropyLoss()
         
-        self.contrastive_coef = kwargs['lambda']
+        self.contrastive_coef = kwargs['lambda_']
         
     def info_nce_loss(self, z: torch.Tensor, z_mask: torch.Tensor, temp=0.07):
         # NOTE: SLIP has default temperature 0.1
@@ -227,6 +227,6 @@ def build_simmim(config):
     else:
         raise NotImplementedError(f"Unknown pre-train model: {model_type}")
 
-    model = SimMIM(encoder=encoder, encoder_stride=encoder_stride)
+    model = SimMIM(encoder=encoder, encoder_stride=encoder_stride, lambda_=config.LAMBDA)
 
     return model
