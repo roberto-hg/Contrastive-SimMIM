@@ -132,6 +132,7 @@ _C.TRAIN.OPTIMIZER.MOMENTUM = 0.9
 
 # [SimMIM] Layer decay for fine-tuning
 _C.TRAIN.LAYER_DECAY = 1.0
+_C.LAMBDA = 1.0
 
 # -----------------------------------------------------------------------------
 # Augmentation settings
