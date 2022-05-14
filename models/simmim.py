@@ -115,11 +115,17 @@ class SimMIM(nn.Module):
         self.ce_loss = nn.CrossEntropyLoss()
         
         self.contrastive_coef = kwargs['lambda_']
+
+        # SLIP components from https://github.com/facebookresearch/SLIP/blob/main/losses.py
+        self.last_local_batch_size = None
+        self.masks = None
+        self.labels = None
         
     def info_nce_loss(self, z: torch.Tensor, z_mask: torch.Tensor, temp=0.07):
         # NOTE: SLIP has default temperature 0.1
-        q_a = z_mask
-        q_b = z
+        B = z_mask.size(0) # batch size
+        q_a = z_mask.contiguous().view(B, -1) # flatten, can do reshape here
+        q_b = z.contiguous().view(B, -1) # flatten, can do reshape here
 
         q_a = F.normalize(q_a, dim=-1, p=2)
         q_b = F.normalize(q_b, dim=-1, p=2)
