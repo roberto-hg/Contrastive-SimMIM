@@ -131,32 +131,33 @@ class SimMIM(nn.Module):
         q_b = F.normalize(q_b, dim=-1, p=2)
 
         local_batch_size = q_a.size(0)
-
         if local_batch_size != self.last_local_batch_size:
-            self.labels = local_batch_size * utils.get_rank() + torch.arange(
+            # self.labels = local_batch_size * utils.get_rank() + torch.arange(
+            #     local_batch_size, device=q_a.device
+            # )
+            self.labels = torch.arange(
                 local_batch_size, device=q_a.device
             )
-            total_batch_size = local_batch_size * utils.get_world_size()
+            total_batch_size = local_batch_size 
+
             self.masks = F.one_hot(self.labels, total_batch_size) * 1e9
             self.last_local_batch_size = local_batch_size
-
         logits_aa = torch.matmul(q_a, q_a.transpose(0, 1)) / temp
         logits_aa = logits_aa - self.masks
         logits_bb = torch.matmul(q_b, q_b.transpose(0, 1)) / temp
         logits_bb = logits_bb - self.masks
         logits_ab = torch.matmul(q_a, q_b.transpose(0, 1)) / temp
         logits_ba = torch.matmul(q_b, q_a.transpose(0, 1)) / temp
-
         loss_a = F.cross_entropy(torch.cat([logits_ab, logits_aa], dim=1), self.labels)
         loss_b = F.cross_entropy(torch.cat([logits_ba, logits_bb], dim=1), self.labels)
         loss = (loss_a + loss_b) / 2  # divide by 2 to average over all samples
 
         # compute accuracy
-        with torch.no_grad():
-            pred = torch.argmax(torch.cat([logits_ab, logits_aa], dim=1), dim=-1)
-            correct = pred.eq(self.labels).sum()
-            acc = 100 * correct / local_batch_size
-            print(f'accuracy: {acc}')
+        # with torch.no_grad():
+        #     pred = torch.argmax(torch.cat([logits_ab, logits_aa], dim=1), dim=-1)
+        #     correct = pred.eq(self.labels).sum()
+        #     acc = 100 * correct / local_batch_size
+            # print(f'accuracy: {acc}')
 
         return loss
     
@@ -167,14 +168,15 @@ class SimMIM(nn.Module):
         
         # patched (heavy augmented) decoding
         x_rec = self.decoder(z_mask)
-
         mask = mask.repeat_interleave(self.patch_size, 1).repeat_interleave(self.patch_size, 2).unsqueeze(1).contiguous()
         loss_recon = F.l1_loss(x, x_rec, reduction='none')
         loss = (loss_recon * mask).sum() / (mask.sum() + 1e-5) / self.in_chans
         
         # lightly augmented loss
         nce_loss = self.info_nce_loss(z, z_mask)
-        return loss + self.contrastive_coef * nce_loss
+        if self.contrastive_coef == -1:
+            return 0*loss + nce_loss, loss, nce_loss
+        return loss + self.contrastive_coef * nce_loss, loss, nce_loss
 
     @torch.jit.ignore
     def no_weight_decay(self):

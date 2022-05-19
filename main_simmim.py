@@ -54,6 +54,8 @@ def parse_option():
     parser.add_argument('--output', default='output', type=str, metavar='PATH',
                         help='root of output folder, the full path is <output>/<model_name>/<tag> (default: output)')
     parser.add_argument('--tag', help='tag of experiment')
+    parser.add_argument('--lambda_', type=float, help='constrastive scaling')
+    parser.add_argument('--seed', type=int, help='experimental random seed')
 
     # distributed training
     parser.add_argument("--local_rank", type=int, required=True, help='local rank for DistributedDataParallel')
@@ -124,15 +126,15 @@ def train_one_epoch(config, model, data_loader, optimizer, epoch, lr_scheduler):
     batch_time = AverageMeter()
     loss_meter = AverageMeter()
     norm_meter = AverageMeter()
+    sloss_meter = AverageMeter()
+    closs_meter = AverageMeter()
 
     start = time.time()
     end = time.time()
     for idx, (img, mask, _) in enumerate(data_loader):
         img = img.cuda(non_blocking=True)
         mask = mask.cuda(non_blocking=True)
-
-        loss = model(img, mask)
-
+        loss, sloss, closs = model(img, mask)
         if config.TRAIN.ACCUMULATION_STEPS > 1:
             loss = loss / config.TRAIN.ACCUMULATION_STEPS
             if config.AMP_OPT_LEVEL != "O0":
@@ -169,12 +171,12 @@ def train_one_epoch(config, model, data_loader, optimizer, epoch, lr_scheduler):
                     grad_norm = get_grad_norm(model.parameters())
             optimizer.step()
             lr_scheduler.step_update(epoch * num_steps + idx)
-
         torch.cuda.synchronize()
-
         loss_meter.update(loss.item(), img.size(0))
         norm_meter.update(grad_norm)
         batch_time.update(time.time() - end)
+        sloss_meter.update(sloss.item(), img.size(0))
+        closs_meter.update(closs.item(), img.size(0))
         end = time.time()
 
         if idx % config.PRINT_FREQ == 0:
@@ -186,8 +188,12 @@ def train_one_epoch(config, model, data_loader, optimizer, epoch, lr_scheduler):
                 f'eta {datetime.timedelta(seconds=int(etas))} lr {lr:.6f}\t'
                 f'time {batch_time.val:.4f} ({batch_time.avg:.4f})\t'
                 f'loss {loss_meter.val:.4f} ({loss_meter.avg:.4f})\t'
+                f'sloss {sloss_meter.val:.4f} ({sloss_meter.avg:.4f})\t'
+                f'closs {closs_meter.val:.4f} ({closs_meter.avg:.4f})\t'
                 f'grad_norm {norm_meter.val:.4f} ({norm_meter.avg:.4f})\t'
                 f'mem {memory_used:.0f}MB')
+    with open(os.path.join(config.OUTPUT,'loss.txt'),'a') as f:
+        f.write(f'Epoch: {epoch} | Loss: {np.round(loss.item(),4)} | SimMIM-Loss: {np.round(sloss.item(),4)} | SimCLR-Loss: {np.round(closs.item(),4)}\n')
     epoch_time = time.time() - start
     logger.info(f"EPOCH {epoch} training takes {datetime.timedelta(seconds=int(epoch_time))}")
 
@@ -210,6 +216,8 @@ if __name__ == '__main__':
     torch.distributed.barrier()
 
     seed = config.SEED + dist.get_rank()
+    print(f'Seed: {config.SEED}')
+    print(f'LAMBDA: {config.LAMBDA}')
     torch.manual_seed(seed)
     np.random.seed(seed)
     cudnn.benchmark = True
