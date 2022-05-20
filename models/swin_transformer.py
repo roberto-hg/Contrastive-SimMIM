@@ -575,9 +575,12 @@ class SwinTransformer(nn.Module):
         x = torch.flatten(x, 1)
         return x
 
-    def forward(self, x):
+    def forward(self, x, lin_eval=False):
         x = self.forward_features(x)
-        x = self.head(x)
+        if lin_eval:
+            x = self.head(x.detach())
+        else:
+            x = self.head(x)
         return x
 
     def flops(self):
