@@ -1,3 +1,11 @@
+# Contrastive SimMIM or MIM-CLR
+
+This repo is based on the original [SimMIM repo](https://github.com/microsoft/SimMIM) which is an implementation of ["SimMIM: A Simple Framework for Masked Image Modeling"](https://arxiv.org/abs/2111.09886).
+
+The implementation of the contrastive SimCLR loss was adapted from the [SLIP repo](https://github.com/facebookresearch/SLIP).
+
+Here is the original SimMIM README:
+
 # SimMIM
 
 By [Zhenda Xie](https://zdaxie.github.io)\*, [Zheng Zhang](https://stupidzz.github.io/)\*, [Yue Cao](http://yue-cao.me)\*, [Yutong Lin](https://github.com/impiga), [Jianmin Bao](https://jianminbao.github.io/), [Zhuliang Yao](https://github.com/Howal), [Qi Dai](https://www.microsoft.com/en-us/research/people/qid/) and [Han Hu](https://ancientmooner.github.io/)\*.
