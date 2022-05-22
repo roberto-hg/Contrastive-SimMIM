@@ -68,6 +68,11 @@ def build_dataset(is_train, config, logger):
         root = os.path.join(config.DATA.DATA_PATH, prefix)
         dataset = datasets.ImageFolder(root, transform=transform)
         nb_classes = 1000
+    elif config.DATA.DATASET == 'stl10':
+        prefix = 'train' if is_train else 'test'
+        root = os.path.join(config.DATA.DATA_PATH, prefix)
+        dataset = datasets.STL10(root='datasets/stl10', split=prefix, transform=transform, download=True)
+        nb_classes = 10
     else:
         raise NotImplementedError("We only support ImageNet Now.")
 

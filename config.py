@@ -132,7 +132,7 @@ _C.TRAIN.OPTIMIZER.MOMENTUM = 0.9
 
 # [SimMIM] Layer decay for fine-tuning
 _C.TRAIN.LAYER_DECAY = 1.0
-_C.LAMBDA = 1.0
+_C.LAMBDA = 0
 
 # -----------------------------------------------------------------------------
 # Augmentation settings
@@ -190,6 +190,8 @@ _C.EVAL_MODE = False
 _C.THROUGHPUT_MODE = False
 # local rank for DistributedDataParallel, given by command line argument
 _C.LOCAL_RANK = 0
+# Liner Eval Flag
+_C.LIN_EVAL = False
 
 # [SimMIM] path to pre-trained model
 _C.PRETRAINED = ''
@@ -249,6 +251,10 @@ def update_config(config, args):
         config.LAMBDA = args.lambda_
     if _check_args('seed'):
         config.SEED = args.seed
+    if _check_args('seed'):
+        config.SEED = args.seed
+    if _check_args('lin_eval'):
+        config.LIN_EVAL = args.lin_eval
 
     # set local rank for distributed training
     config.LOCAL_RANK = args.local_rank

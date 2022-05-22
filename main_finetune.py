@@ -81,7 +81,7 @@ def main(config):
     optimizer = build_optimizer(config, model, logger, is_pretrain=False)
     if config.AMP_OPT_LEVEL != "O0":
         model, optimizer = amp.initialize(model, optimizer, opt_level=config.AMP_OPT_LEVEL)
-    model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[config.LOCAL_RANK], broadcast_buffers=False)
+    model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[config.LOCAL_RANK], broadcast_buffers=False,find_unused_parameters=True)
     model_without_ddp = model.module
 
     n_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
@@ -101,6 +101,7 @@ def main(config):
         criterion = torch.nn.CrossEntropyLoss()
 
     max_accuracy = 0.0
+    max_accuracy5 = 0.0
 
     if config.TRAIN.AUTO_RESUME:
         resume_file = auto_resume_helper(config.OUTPUT, logger)
@@ -127,6 +128,11 @@ def main(config):
         throughput(data_loader_val, model, logger)
         return
 
+    if config.LIN_EVAL:
+        for name, param in model.named_parameters():
+            if 'module.head' not in name:
+                param.requires_grad = False 
+
     logger.info("Start training")
     start_time = time.time()
     for epoch in range(config.TRAIN.START_EPOCH, config.TRAIN.EPOCHS):
@@ -137,9 +143,12 @@ def main(config):
             save_checkpoint(config, epoch, model_without_ddp, max_accuracy, optimizer, lr_scheduler, logger)
 
         acc1, acc5, loss = validate(config, data_loader_val, model)
-        logger.info(f"Accuracy of the network on the {len(dataset_val)} test images: {acc1:.1f}%")
+        logger.info(f"Accuracy %1 of the network on the {len(dataset_val)} test images: {acc1:.1f}%")
+        logger.info(f"Accuracy %5 of the network on the {len(dataset_val)} test images: {acc5:.1f}%")
         max_accuracy = max(max_accuracy, acc1)
-        logger.info(f'Max accuracy: {max_accuracy:.2f}%')
+        logger.info(f'Max accuracy %1: {max_accuracy:.2f}%')
+        max_accuracy5 = max(max_accuracy5, acc5)
+        logger.info(f'Max accuracy %5: {max_accuracy5:.2f}%')
 
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
@@ -166,7 +175,7 @@ def train_one_epoch(config, model, criterion, data_loader, optimizer, epoch, mix
         if mixup_fn is not None:
             samples, targets = mixup_fn(samples, targets)
 
-        outputs = model(samples)
+        outputs = model(samples, config.LIN_EVAL)
 
         if config.TRAIN.ACCUMULATION_STEPS > 1:
             loss = criterion(outputs, targets)
